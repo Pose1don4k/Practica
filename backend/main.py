@@ -9,12 +9,12 @@ from datetime import datetime
 # Инициализируем приложение FastAPI
 app = FastAPI(
     title="OFZ Analytics API",
-    description="Микросервис для получения исторических котировок ОФЗ (индекс RGBI) с Московской Биржи",
+    description="Микросервис для получения исторических котировок ОФЗ с Московской Биржи",
     version="1.0.0"
 )
 
-# Настраиваем CORS, чтобы наш Vue.js компонент (который мы напишем позже) 
-# мог свободно делать запросы к бэкенду с другого порта (например, с localhost:8080)
+# Настраиваем CORS, чтобы наш Vue.js компонент
+# мог свободно делать запросы к бэкенду с другого порта 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # В продакшене здесь должны быть внутренние домены компании
@@ -23,7 +23,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Модели Pydantic для контракта API (помогают валидировать данные) ---
+#Модели Pydantic для контракта API
 class Candle(BaseModel):
     date: str
     open: float
@@ -49,7 +49,7 @@ async def fetch_moex_data_with_retry(year: int) -> List[dict]:
     Никакие сторонние библиотеки для Мосбиржи не используются.
     """
     # 24 = интервал 1 день (свеча строится за день)
-    # SNDX = группа индексов. RGBI = Индекс гособлигаций РФ (лучший маркер цены ОФЗ)
+    # SNDX = группа индексов. RGBI = Индекс гособлигаций РФ 
     url = "https://iss.moex.com/iss/engines/stock/markets/index/boards/SNDX/securities/RGBI/candles.json"
     params = {
         "from": f"{year}-01-01",
@@ -151,5 +151,5 @@ async def get_ofz_candles(year: Optional[int] = Query(None, description="Год 
         }
     }
     
-    # Мы работаем как сквозная труба (транзит): получили данные и сразу отдали их.
+    # получили данные и сразу отдали их.
     return response_payload

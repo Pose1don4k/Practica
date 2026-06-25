@@ -1,162 +1,101 @@
 <template>
   <div class="ofz-widget-container">
-    <div class="widget-header">
-      <h3>Аналитика цен ОФЗ (RGBI)</h3>
-      <div class="controls">
-        <label for="year-select">Выберите год:</label>
-        <select id="year-select" v-model="selectedYear" @change="fetchData" :disabled="isLoading">
-          <option v-for="year in availableYears" :key="year" :value="year">
-            {{ year }}
-          </option>
-        </select>
+    
+    <WidgetHeader 
+      v-model="selectedYear" 
+      :isLoading="isLoading" 
+      @fetch-data="fetchData" 
+    />
+
+    <div v-if="isError" class="error-message">Сервис недоступен</div>
+    
+    <div v-else-if="isLoading" class="loading-message">Загрузка данных...</div>
+    
+    <div v-else-if="isFullyEmpty" class="info-message">
+      Торговые данные отсутствуют как за {{ selectedYear }} год, так и за прошлый {{ selectedYear - 1 }} год.
+    </div>
+
+    <div v-else-if="apiData">
+      
+      <div v-if="partialWarningMessage" class="warning-banner">
+        Внимание: {{ partialWarningMessage }}
       </div>
-    </div>
 
-    <div v-if="isError" class="error-message">
-      Сервис недоступен
+      <OfzChart 
+        :primarySeries="apiData.primary_series"
+        :secondarySeries="apiData.secondary_series"
+        :themeColors="customColors" 
+      />
     </div>
-
-    <div v-else-if="isLoading" class="loading-message">
-      Загрузка данных...
-    </div>
-
-    <div v-show="!isError && !isLoading" ref="chartRef" class="chart-box"></div>
+    
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'; // Добавили nextTick
-import * as echarts from 'echarts';
-
-const chartRef = ref(null);
-let chartInstance = null;
+import { ref, onMounted } from 'vue';
+import WidgetHeader from './WidgetHeader.vue';
+import OfzChart from './OfzChart.vue';
 
 const currentYear = new Date().getFullYear();
 const selectedYear = ref(currentYear);
 const isError = ref(false);
 const isLoading = ref(false);
+const isFullyEmpty = ref(false); // Флаг полного отсутствия данных
+const partialWarningMessage = ref(''); // Текст предупреждения о конкретном годе
+const apiData = ref(null);
 
-const availableYears = Array.from({ length: 10 }, (_, i) => currentYear - i);
+// Палитра цветов для графиков
+const customColors = {
+  primaryUp: '#ff4d4d',   
+  primaryDown: '#cc0000', 
+  secondaryUp: '#ffb3e6', 
+  secondaryDown: '#ff66c2'
+};
 
 const fetchData = async () => {
   isLoading.value = true;
   isError.value = false;
+  isFullyEmpty.value = false;
+  partialWarningMessage.value = '';
+  apiData.value = null;
 
   try {
     const response = await fetch(`http://127.0.0.1:8000/api/v1/ofz/candles?year=${selectedYear.value}`);
-    
-    if (!response.ok) {
-      throw new Error('Сбой при получении данных');
-    }
+    if (!response.ok) throw new Error('Сбой при получении данных');
 
     const data = await response.json();
     
-    // ИСПРАВЛЕНИЕ: Сначала выключаем экран загрузки, чтобы div графика появился в DOM
-    isLoading.value = false;
+    // Анализируем наполненность массивов данных, которые прислал бэкенд
+    const hasPrimary = data.primary_series.data.length > 0;
+    const hasSecondary = data.secondary_series.data.length > 0;
     
-    // Ждем, пока Vue физически обновит HTML-страницу и блок получит свои 100% ширины
-    await nextTick();
-    
-    // И только теперь инициализируем и рисуем график!
-    renderChart(data);
+    const pYear = data.primary_series.year;
+    const sYear = data.secondary_series.year;
 
+    if (!hasPrimary && !hasSecondary) {
+      // Сценарий 1: Данных нет вообще (например, глубокое будущее)
+      isFullyEmpty.value = true;
+    } else {
+      // Сценарий 2: Данные есть (хотя бы частично), передаем их графику
+      apiData.value = data;
+
+      // Сценарий 3: Выясняем, по какому именно году данные отсутствуют
+      if (!hasPrimary) {
+        partialWarningMessage.value = `данные отсутствуют за выбранный ${pYear} год.`;
+      } else if (!hasSecondary) {
+        partialWarningMessage.value = `данные отсутствуют за прошлый ${sYear} год.`;
+      }
+    }
   } catch (error) {
     console.error('Ошибка виджета ОФЗ:', error);
     isError.value = true;
-    isLoading.value = false; // Выключаем загрузку даже при ошибке
+  } finally {
+    isLoading.value = false;
   }
-};
-
-const renderChart = (apiResponse) => {
-  if (chartInstance != null) {
-    chartInstance.dispose();
-  }
-  chartInstance = echarts.init(chartRef.value);
-
-  const primary = apiResponse.primary_series;
-  const secondary = apiResponse.secondary_series;
-
-  const formatCandles = (dataArray) => {
-    return dataArray.map(item => {
-      const [, month, day] = item.date.split('-'); 
-      return {
-        name: `${day}-${month}`, 
-        value: [item.open, item.close, item.low, item.high]
-      };
-    });
-  };
-
-  const longestSeries = primary.data.length > secondary.data.length ? primary.data : secondary.data;
-  const xAxisData = longestSeries.map(item => {
-    const [, month, day] = item.date.split('-');
-    return `${day}.${month}`;
-  });
-
-  const option = {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'cross' }
-    },
-    grid: { left: '5%', right: '5%', bottom: '15%' }, 
-    xAxis: {
-      type: 'category',
-      data: xAxisData,
-      boundaryGap: true,
-    },
-    yAxis: {
-      type: 'value',
-      scale: true,
-    },
-    dataZoom: [
-      {
-        type: 'inside',
-        start: 0,
-        end: 100
-      },
-      {
-        show: true,
-        type: 'slider',
-        bottom: '0%',
-        start: 0,
-        end: 100
-      }
-    ],
-    series: [
-      {
-        name: `Год ${secondary.year}`,
-        type: 'candlestick',
-        data: formatCandles(secondary.data),
-        z: 1,
-        itemStyle: {
-          color: '#ffb3e6',
-          color0: '#ff66c2',
-          borderColor: '#ffb3e6',
-          borderColor0: '#ff66c2'
-        }
-      },
-      {
-        name: `Год ${primary.year}`,
-        type: 'candlestick',
-        data: formatCandles(primary.data),
-        z: 2,
-        itemStyle: {
-          color: '#ff4d4d',
-          color0: '#cc0000',
-          borderColor: '#ff4d4d',
-          borderColor0: '#cc0000'
-        }
-      }
-    ]
-  };
-
-  chartInstance.setOption(option);
 };
 
 onMounted(() => {
   fetchData();
-  window.addEventListener('resize', () => {
-    if (chartInstance) chartInstance.resize();
-  });
 });
 </script>
 
@@ -170,35 +109,19 @@ onMounted(() => {
   max-width: 900px;
   margin: 0 auto;
 }
-.widget-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.controls select {
-  margin-left: 8px;
-  padding: 4px 8px;
-}
-.chart-box {
-  width: 100%;
-  height: 400px;
-}
-.error-message {
-  height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #d32f2f;
-  font-weight: bold;
-  background-color: #ffebee;
+.error-message { height: 400px; display: flex; align-items: center; justify-content: center; color: #d32f2f; font-weight: bold; background-color: #ffebee; border-radius: 4px; }
+.loading-message { height: 400px; display: flex; align-items: center; justify-content: center; color: #666; }
+.info-message { height: 400px; display: flex; align-items: center; justify-content: center; color: #1976d2; font-weight: bold; background-color: #e3f2fd; border-radius: 4px; }
+
+/* Стиль для нового информативного баннера */
+.warning-banner {
+  padding: 10px 14px;
+  background-color: #fffde7; /* Легкий пастельный желтый */
+  border: 1px solid #fff59d;
   border-radius: 4px;
-}
-.loading-message {
-  height: 400px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #666;
+  color: #f57f17; /* Насыщенный янтарный цвет текста */
+  font-weight: 500;
+  margin-bottom: 12px;
+  font-size: 0.95em;
 }
 </style>

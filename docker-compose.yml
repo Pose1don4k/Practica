@@ -1,0 +1,20 @@
+name: ofz_analytics
+
+services:
+  # Настройка сервиса бэкенда
+  api:
+    build: ./backend
+    container_name: ofz_backend
+    ports:
+      - "8000:8000"
+    restart: always
+
+  # Настройка сервиса фронтенда
+  web:
+    build: ./frontend
+    container_name: ofz_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: always
